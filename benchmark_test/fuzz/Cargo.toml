@@ -1,0 +1,26 @@
+[package]
+name = "final_project-fuzz"
+version = "0.0.1"
+edition = "2021"
+publish = false
+
+[package.metadata]        
+cargo-fuzz = true         
+
+[dependencies]
+libfuzzer-sys = "0.4"
+
+[dependencies.final_project]
+path = ".."
+
+[[bin]]
+name = "fuzz_evaluate"
+path = "fuzz_targets/fuzz_evaluate.rs"
+test = false
+doc = false
+
+[[bin]]
+name = "fuzz_parse_integer"
+path = "fuzz_targets/fuzz_parse_integer.rs"
+test = false
+doc = false

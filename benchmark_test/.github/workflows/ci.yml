@@ -1,0 +1,144 @@
+
+name: Rust CI
+
+on:
+  push:
+    branches: ["**"]
+  pull_request:
+    branches: [main]
+
+env:
+  CARGO_TERM_COLOR: always
+  RUST_BACKTRACE: 1
+
+jobs:
+
+  # Job 1: 格式與 Lint 檢查
+
+  fmt-and-lint:
+    name: 格式 & Lint
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: 安裝 Rust stable (含 rustfmt + clippy)
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+
+      - name: 快取 cargo 依賴
+        uses: actions/cache@v5
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
+
+      - name: 格式檢查 (rustfmt) 
+        run: cargo fmt --all -- --check
+
+      - name: Clippy 靜態分析 (警告即失敗) 
+        run: cargo clippy --all-targets --all-features -- -D warnings
+
+
+  # Job 2: 測試 (Unit Tests + Doc Tests) 
+
+  test:
+    name: 單元測試 & Doc Tests
+    runs-on: ubuntu-latest
+    needs: fmt-and-lint
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: 安裝 Rust stable
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: 快取 cargo 依賴
+        uses: actions/cache@v5
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
+
+      - name: 執行所有測試 (含 Doc Tests) 
+        # --doc  → 只跑 Doc Tests
+        # 預設同時跑 unit tests + integration tests + doc tests
+        run: cargo test --verbose
+
+      - name: 單獨確認 Doc Tests 通過
+        run: cargo test --doc --verbose
+
+
+  # Job 3: 模糊測試 
+
+  fuzz:
+    name: 模糊測試 (cargo-fuzz) 
+    runs-on: ubuntu-latest
+    needs: test
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: 安裝 Rust nightly (cargo-fuzz 需要 nightly) 
+        uses: dtolnay/rust-toolchain@nightly
+
+      - name: 快取 cargo 依賴
+        uses: actions/cache@v5
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: ${{ runner.os }}-cargo-nightly-${{ hashFiles('**/Cargo.lock') }}
+
+      - name: 安裝 cargo-fuzz
+        run: cargo install cargo-fuzz
+
+      - name: 模糊測試 fuzz_evaluate (30 秒) 
+        working-directory: ./
+        run: |
+          cargo fuzz run fuzz_evaluate -- -max_total_time=30 -max_len=256
+
+      - name: 模糊測試fuzz_parse_integer (30 秒) 
+        working-directory: ./
+        run: |
+          cargo fuzz run fuzz_parse_integer -- -max_total_time=30 -max_len=128
+
+      - name: 儲存 fuzz 語料庫 (供後續使用) 
+        if: always()
+        uses: actions/upload-artifact@v5
+        with:
+          name: fuzz-corpus
+          path: fuzz/corpus/
+          if-no-files-found: ignore
+
+  # Job 4: Release 編譯
+  build:
+    name: Release 編譯
+    runs-on: ubuntu-latest
+    needs: [test, fuzz]
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: 安裝 Rust stable
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: 快取 cargo 依賴
+        uses: actions/cache@v5
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: ${{ runner.os }}-cargo-release-${{ hashFiles('**/Cargo.lock') }}
+
+      - name: Release 編譯
+        run: cargo build --release --verbose
+
+      - name: 上傳編譯產物
+        uses: actions/upload-artifact@v5
+        with:
+          name: rust_demo-binary
+          path: target/release/rust_demo
